@@ -4,6 +4,9 @@ from langchain_openai import ChatOpenAI
 from langchain.chains import ConversationChain
 from langchain.memory import ConversationBufferMemory
 from langchain.prompts import ChatPromptTemplate, MessagesPlaceholder
+from llm_answers import LLMAnswer
+from llm_output_parser import LLMOutputParser
+
 
 
 class GameEngine:
@@ -14,7 +17,7 @@ class GameEngine:
         self.games = self.load_games(games_path)
 
 
-    def load_prompt(self, path):
+    def load_prompt(self, path: str):
         prompt_file = Path(path)
         
         if not prompt_file.exists():
@@ -75,6 +78,8 @@ class GameEngine:
 
     def start(self):
         print("Welcome to Danetka game!")
+        parser = LLMOutputParser() 
+        
         while True:
             game = self.pick_game()
             
@@ -92,11 +97,17 @@ class GameEngine:
                     break
 
                 response = chain.run(input=user_input)
-                print(f"LLM: {response}")
-
-                if "game is over" in response.lower() or "correct" in response.lower():
-                    print("\nYou've solved the riddle!!!\n")
+                parsed = parser.parse(response)
+            
+                if parsed in [LLMAnswer.WIN, LLMAnswer.INVALID, LLMAnswer.YES, LLMAnswer.NO]:
+                    print("LLM: ", parsed.value)
+                
+                if parsed == LLMAnswer.SHOW_RIDDLE:
+                    print(f"LLM: {game['solution']}, game over")
+                
+                if parsed in [LLMAnswer.WIN, LLMAnswer.SHOW_RIDDLE]:
                     break
+                
 
             continue_the_game = input("Do you want to play another game? (y/n): ")
             if continue_the_game.lower() != "y":
