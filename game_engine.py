@@ -5,7 +5,8 @@ from langchain.chains import ConversationChain
 from langchain.memory import ConversationBufferMemory
 from langchain.prompts import ChatPromptTemplate, MessagesPlaceholder
 from llm_answers import LLMAnswer
-from llm_output_parser import LLMOutputParser
+from langchain.output_parsers import PydanticOutputParser
+from game_answer import GameAnswer
 
 
 
@@ -15,6 +16,7 @@ class GameEngine:
         self.llm = ChatOpenAI(model="gpt-4o", temperature=0.0)
         self.prompt = self.load_prompt(prompt_path)
         self.games = self.load_games(games_path)
+        self.parser = PydanticOutputParser(pydantic_object=GameAnswer)
 
 
     def load_prompt(self, path: str):
@@ -66,7 +68,8 @@ class GameEngine:
             ("system", f"The riddle is: {game['riddle']}"),
             ("system", f"The hidden solution is: {game['solution']}"),
             MessagesPlaceholder("chat_history"),
-            ("human", "{input}")
+            ("human", "{input}"),
+            ("system", "{format_instructions}")
         ])
         
         memory = ConversationBufferMemory(
@@ -74,11 +77,16 @@ class GameEngine:
             return_messages=True
         )
         
-        return ConversationChain(llm=self.llm, prompt=prompt, memory=memory, verbose = False)
+        
+        return ConversationChain(
+            llm=self.llm,
+            prompt=prompt.partial(format_instructions=self.parser.get_format_instructions()),
+            memory=memory,
+            verbose=False
+        )
 
     def start(self):
         print("Welcome to Danetka game!")
-        parser = LLMOutputParser() 
         
         while True:
             game = self.pick_game()
@@ -97,15 +105,25 @@ class GameEngine:
                     break
 
                 response = chain.run(input=user_input)
-                parsed = parser.parse(response)
-            
-                if parsed in [LLMAnswer.WIN, LLMAnswer.INVALID, LLMAnswer.YES, LLMAnswer.NO]:
-                    print("LLM: ", parsed.value)
+                try:
+                    parsed: GameAnswer = self.parser.parse(response)
+                except Exception as e:
+                    print("Failed to parse LLM response:", e)
+                    continue 
+
+                print("LLM:", parsed.answer)
+
+                if parsed.hint:
+                    if parsed.hint_count and parsed.hint_count > 3:
+                        print("LLM: No more hints, just ask yes/no questions")
+                    else:
+                        print("Hint:", parsed.hint, f"(Hints used: {parsed.hint_count})")
                 
-                if parsed == LLMAnswer.SHOW_RIDDLE:
-                    print(f"LLM: {game['solution']}, game over")
-                
-                if parsed in [LLMAnswer.WIN, LLMAnswer.SHOW_RIDDLE]:
+
+                if parsed.solution:
+                    print("Solution:", parsed.solution, "Game over")
+
+                if parsed.answer == "you won! game over" or parsed.solution:
                     break
                 
 
